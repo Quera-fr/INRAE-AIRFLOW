@@ -58,4 +58,28 @@ with DAG(
                                   trigger_rule="one_success")
     
     first_task >> task_bash >> task_random_choice >> [task_1, task_2] >> task_goodbye
+
+
+
+
+# Possibilités schedule_interval
+
+# '@once' : une seule exécution
+# '@hourly' : toutes les heures
+# '@daily' : tous les jours
+# '@weekly' : toutes les semaines
+# '@monthly' : tous les mois
+# '@yearly' : tous les ans
+#  timedelta(seconds=10) : toutes les 10 secondes
+
+
+# all_success : déclenche le DAG si toutes les tâches précédentes ont réussi
+# all_failed : déclenche le DAG si toutes les tâches précédentes ont échoué
+# all_done : déclenche le DAG si toutes les tâches précédentes sont terminées
+# one_success : déclenche le DAG si une tâche précédente a réussi
+# one_failed : déclenche le DAG si une tâche précédente a échoué
+# none_failed : déclenche le DAG si aucune tâche précédente n'a échoué
+# none_skipped : déclenche le DAG si aucune tâche précédente n'a été ignorée
+# none_failed_or_skipped : déclenche le DAG si aucune tâche précédente n'a échoué ou n'a été ignorée
+# dummy : déclenche le DAG si la tâche précédente est une tâche factice
     
