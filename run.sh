@@ -1,5 +1,5 @@
 docker build -t airflow-server .
 
-docker run -p 8080:8080 \
- -v "C:/Users/Quera/Desktop/INRAE-Airflow:/root/airflow" \
+docker run -p 8050:8080 \
+ -v "$(pwd):/root/airflow" \
  -it airflow-server
