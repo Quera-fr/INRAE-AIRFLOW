@@ -59,7 +59,7 @@ def upload_file(file:UploadFile=File(...)):
     }
 
     response = requests.post('http://localhost:11434/api/generate', json=data)
-    text = response.json()['response'].split('```')[1]
+    text = response.json()['response']
 
     with open("data.jsonl", "a", encoding="utf-8") as file:
         json.dump({"response": text}, file)
