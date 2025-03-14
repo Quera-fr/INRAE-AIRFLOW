@@ -1,90 +1,84 @@
 from airflow import DAG
 from airflow.operators.python_operator import PythonOperator, BranchPythonOperator
 from airflow.operators.bash_operator import BashOperator
+from airflow.operators.python import ShortCircuitOperator
+from airflow.operators.dagrun_operator import TriggerDagRunOperator
+
 
 from datetime import datetime, timedelta
-import os
+import os,subprocess
 
-# --------------------
+from langchain.document_loaders import UnstructuredMarkdownLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings import SentenceTransformerEmbeddings
+from langchain.vectorstores import Chroma
 
+def check_new_files(ti):
+    folder="/root/airflow/data/documents"
+    if os.path.exists(folder):
+        print('Folder exists')
+        files=os.listdir(folder)
+        list_files = [os.path.join(folder,f) for f in files if os.path.isfile(os.path.join(folder,f))]
+        if list_files:
+            print(list_files)
+            ti.xcom_push(key="files", value=list_files)
+            return True
+        else:
+            print(f"Aucun fichier dans {folder}. Arrêt du process.")
+            return False
+    else:
+        print(f"Le dossier {folder} n'existe pas. Arrêt du process.")
+        return False
 
-# Fonction vérifiant les dossier convert et documents et renvoyant vers la tâche appropriée
-def files_check():
-    list_docs = os.listdir(f'/root/airflow/data/documents')
-    list_convert_docs = os.listdir(f'/root/airflow/data/convert_documents')
-
-    for doc in list_docs:
-        try:
-            if doc.split('.pdf')[0] not in list_convert_docs:
-                print("Document à convertir", doc.split('.pdf')[0])
-                return doc.split('.pdf')[0]
-            else:
-                print("Document déjà converti", doc.split('.pdf')[0])
-        except:
-            print("Error")
-
-
-# Fonction permettant d'écrire dans le fichier waiting.sh la commande de conversion
-# os.system(f'echo "marker_single /root/airflow/data/documents/{document} --output_dir /root/airflow/data/convert_documents" > ./data/waiting.sh')
-def data_preparation(ti):
-    doc = ti.xcom_pull(task_ids='task_check_files')
-    print(doc)
-
-    if doc !=None:
-
-        try:
-            os.mkdir(f'/root/airflow/data/convert_documents/{doc}')
-            os.system(f'echo "marker_single /root/airflow/data/documents/{doc}.pdf --output_dir /root/airflow/data/convert_documents/" > ./data/waiting.sh')
-        except:
-            print('Le dossier existe déjà.')
-
-
-
-# Fonction affichant un message de fin de conversion
-def end_dag():
-    print(f'Conversion terminée')
-
-# --------------------
+def marker_convert_files(ti):
+    files = ti.xcom_pull(task_ids="task_check_new_files", key="files")
+    output_dir="/root/airflow/data/convert_documents"
+    list_path_converted_md = list()
+    if not files:
+        print("Aucun fichier à traiter")
+        return
+    
+    for input_file in files:
+        print(input_file)
+        file_without_ext = os.path.basename(input_file.join(input_file.split('.')[:-1]))
+        converted_file_path_md = os.path.join(output_dir,file_without_ext,file_without_ext+".md")
+        print(file_without_ext)
+        if file_without_ext in os.listdir(output_dir):
+            print(f"Conversion déjà effectuée pour {input_file}")
+            #list_path_converted_md.append(converted_file_path_md)
+        else: 
+            command = ["marker_single", input_file, "--output_dir", output_dir]
+            try:
+                print("Lancement de la conversion !")
+                result=subprocess.run(command,check=True,text=True,capture_output=True)
+                print("Conversion réussie !")
+                print("Sortie:",result.stdout)
+                list_path_converted_md.append(converted_file_path_md)
+            except subprocess.CalledProcessError as e:
+                print("Erreur lors de la conversion :", e.stderr)
+                return False
+    
+    ti.xcom_push(key="list_path_converted_md", value=list_path_converted_md)
 
 # Definition du DAG
-with DAG(
-    'convert_documents',
-    start_date=datetime(2025, 1, 1),
-    schedule_interval= '@once',
-    catchup=False,
-    end_date=datetime(2025, 10, 10),
-    max_active_tasks=1,
-    max_active_runs=1):
-    pass
 
+with DAG("convert_file_dag",
+         start_date=datetime(2025,1,1),
+         schedule_interval=timedelta(seconds=240),
+         end_date=datetime(2025, 10, 10),
+         catchup=False,
+         max_active_tasks=1,
+         max_active_runs=1,): 
 
-    # Tâches 1 : Lister les fichiers dans le dossier convert et documents
-    task_check_files = PythonOperator(
-        task_id='task_check_files',
-        python_callable=files_check)
+    task_check_new_files=ShortCircuitOperator(task_id='task_check_new_files',python_callable=check_new_files)
+    task_convert_marker=PythonOperator(task_id='task_convert_marker',python_callable=marker_convert_files)
 
-
-# Tâches 2 : Ecrire dans le fichier waiting.sh la commande de conversion
-    task_data_preparation = PythonOperator(
-        task_id='task_data_preparation',
-        python_callable=data_preparation)
-
-
-# Tâches 3 : Conversion des fichiers avec un bash operator
-# bash_command="bash '/root/airflow/data/waiting.sh'"
-    task_convert_documents = BashOperator(
-        task_id='task_convert_documents',
-        bash_command="bash '/root/airflow/data/waiting.sh'")
-
-
-
-
-# Tâches 4 : Affichage d'un message de fin
-    task_end_dag = PythonOperator(
-        task_id='task_end_dag',
-        python_callable=end_dag)
-
+    triger_task = TriggerDagRunOperator(
+       task_id='trigger_task',
+       trigger_dag_id='text_summary_dag',
+       trigger_rule= 'all_success'
+       )
 
 
 # Execution du DAG
-task_check_files >> task_data_preparation >> task_convert_documents >> task_end_dag
+task_check_new_files >> task_convert_marker >> triger_task
